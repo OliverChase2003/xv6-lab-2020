@@ -63,6 +63,7 @@ void            ramdiskrw(struct buf*);
 void*           kalloc(void);
 void            kfree(void *);
 void            kinit(void);
+int             freemem();
 
 // log.c
 void            initlog(int, struct superblock*);
@@ -104,6 +105,7 @@ void            yield(void);
 int             either_copyout(int user_dst, uint64 dst, void *src, uint64 len);
 int             either_copyin(void *dst, int user_src, uint64 src, uint64 len);
 void            procdump(void);
+int             cnt_freeproc();
 
 // swtch.S
 void            swtch(struct context*, struct context*);
@@ -137,6 +139,7 @@ int             argstr(int, char*, int);
 int             argaddr(int, uint64 *);
 int             fetchstr(uint64, char*, int);
 int             fetchaddr(uint64, uint64*);
+void            psyscall(void);
 void            syscall();
 
 // trap.c
