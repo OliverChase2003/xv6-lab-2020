@@ -56,6 +56,13 @@ kvminithart()
   sfence_vma();
 }
 
+void
+ukvminithart(pagetable_t kpagetable)
+{
+  w_satp(MAKE_SATP(kpagetable));
+  sfence_vma();
+}
+
 // Return the address of the PTE in page table pagetable
 // that corresponds to virtual address va.  If alloc!=0,
 // create any required page-table pages.
@@ -156,8 +163,8 @@ mappages(pagetable_t pagetable, uint64 va, uint64 size, uint64 pa, int perm)
   for(;;){
     if((pte = walk(pagetable, a, 1)) == 0)
       return -1;
-    if(*pte & PTE_V)
-      panic("remap");
+    if(*pte & PTE_V) ;
+      // panic("remap");
     *pte = PA2PTE(pa) | perm | PTE_V;
     if(a == last)
       break;
@@ -379,6 +386,8 @@ copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
 int
 copyin(pagetable_t pagetable, char *dst, uint64 srcva, uint64 len)
 {
+  return copyin_new(pagetable, dst, srcva, len);
+
   uint64 n, va0, pa0;
 
   while(len > 0){
@@ -405,6 +414,8 @@ copyin(pagetable_t pagetable, char *dst, uint64 srcva, uint64 len)
 int
 copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
 {
+  return copyinstr_new(pagetable, dst, srcva, max);
+
   uint64 n, va0, pa0;
   int got_null = 0;
 
@@ -438,5 +449,107 @@ copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
     return 0;
   } else {
     return -1;
+  }
+}
+
+void
+flgprint(pte_t pte)
+{
+  //flag     76543210
+  char* s = "DAGUXWRV";
+  pte_t flags = PTE_FLAGS(pte);
+  for(int i = 0; i < 8; i++){
+    if((flags & (1 << i)) == 0)
+      s[7 - i] = '-';
+  }
+  printf("%s\n", s);
+}
+
+void
+_vmprint(pagetable_t pagetable, int level)
+{
+  static char* indent[] = {
+      "..",
+      ".. ..",
+      ".. .. .."
+  };
+  for(int i = 0; i < 512; i++){
+    pte_t pte = pagetable[i];
+    pagetable_t nxt_pgtbl = (pagetable_t)PTE2PA(pte);
+    if(pte & PTE_V){
+      printf("%s %d pte: %p pa: %p ", indent[level], i, pte, nxt_pgtbl);
+      if((pte & (PTE_R | PTE_X | PTE_W)) == 0){
+        printf("\n");
+        _vmprint(nxt_pgtbl, level+1);
+      }else
+        flgprint(pte);
+    }
+  }
+}
+
+void
+vmprint(pagetable_t pagetable)
+{
+  printf("page table %p\n", (uint64)pagetable);
+  _vmprint(pagetable, 0);
+}
+
+pagetable_t
+kvmcreate()
+{
+  pagetable_t kpagetable = uvmcreate();
+  for(int i = 1; i < 512; i++){
+    kpagetable[i] = kernel_pagetable[i];
+  }
+  mappages(kpagetable, UART0, PGSIZE, UART0, PTE_R | PTE_W);
+  mappages(kpagetable, VIRTIO0, PGSIZE, VIRTIO0, PTE_R | PTE_W);
+  mappages(kpagetable, CLINT, 0x10000, CLINT, PTE_R | PTE_W);
+  mappages(kpagetable, PLIC, 0x400000, PLIC, PTE_R | PTE_W);
+  return kpagetable;
+}
+
+void
+kvmfree(pagetable_t kpagetable){
+  pte_t pte0 = kpagetable[0];
+  pagetable_t lv1 = (pagetable_t)PTE2PA(pte0);
+  for(int i = 0; i < 512; i++){
+    pte_t pte1 = lv1[i];
+    if(pte1 & PTE_V){
+      uint64 lv2 = PTE2PA(pte1);
+      kfree((void*)lv2);
+      lv1[i] = 0;
+    }
+  }
+  kfree((void*)lv1);
+  kfree((void*)kpagetable);
+}
+
+void
+u2kvmmap(pagetable_t pagetable, pagetable_t kpagetable, uint64 oldsz, uint64 newsz)
+{
+  // This is the mit class method, which is another version of mappages(), without check remapping;
+  pte_t *upte;
+  pte_t *kpte;
+
+  if(newsz >= PLIC)
+    panic("u2kvmmap: newsz over PLIC");
+
+  for(uint64 va = oldsz; va < newsz; va+=PGSIZE){
+    upte = walk(pagetable, va, 0);
+    if(upte == 0){
+      printf("u2kvmmap: %p %p\n", va, newsz);
+      panic("no upte");
+    }
+    if((*upte & PTE_V) == 0){
+      printf("u2kvmmap: %p %p\n", va, newsz);
+      panic("upte pte_v = 0");
+    }
+    kpte = walk(kpagetable, va, 1);
+    if(kpte == 0){
+      printf("u2kvmmap: %p %p\n", va, newsz);
+      panic("no kpte");
+    }
+    *kpte = *upte;
+    *kpte &= ~(PTE_W | PTE_X | PTE_U);
   }
 }
