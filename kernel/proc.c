@@ -259,11 +259,11 @@ growproc(int n)
     if((sz = uvmalloc(p->pagetable, sz, sz + n)) == 0) {
       return -1;
     }
-    u2kvmmap(p->pagetable, p->kpagetable, sz - n, sz);
   } else if(n < 0){
     sz = uvmdealloc(p->pagetable, sz, sz + n);
-    uvmdealloc(p->kpagetable, sz, sz + n);
+    //uvmdealloc(p->kpagetable, sz, sz + n);
   }
+  u2kvmmap(p->pagetable, p->kpagetable, sz - n, sz);
   p->sz = sz;
   return 0;
 }
