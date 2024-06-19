@@ -104,7 +104,7 @@ sys_trace(void)
   int n;
   if(argint(0, &n) < 0)
     return -1;
-  p->traced = n;
+  p->traced |= n;
   return 0;
 }
 
@@ -119,6 +119,7 @@ sys_sysinfo(void)
   struct sysinfo src;
   src.freemem = freemem();
   src.nproc = cnt_freeproc();
-  if(copyout(p->pagetable, dstva, (char*)&src, sizeof(struct sysinfo)));
+  if(copyout(p->pagetable, dstva, (char*)&src, sizeof(src)) < 0)
+    return -1;
   return 0;
 }
