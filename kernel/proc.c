@@ -113,6 +113,11 @@ found:
     return 0;
   }
 
+  if((p->backup = (struct trapframe *)kalloc()) == 0){
+    release(&p->lock);
+    return 0;
+  }
+
   // An empty user page table.
   p->pagetable = proc_pagetable(p);
   if(p->pagetable == 0){
@@ -121,6 +126,11 @@ found:
     return 0;
   }
 
+  p->alrm_hdlr = 0;
+  p->alrm_period = 0;
+  p->alrm_ticks = 0;
+  p->inalrm = 0;
+  
   // Set up new context to start executing at forkret,
   // which returns to user space.
   memset(&p->context, 0, sizeof(p->context));
@@ -139,8 +149,15 @@ freeproc(struct proc *p)
   if(p->trapframe)
     kfree((void*)p->trapframe);
   p->trapframe = 0;
+  if(p->backup)
+    kfree((void*)p->backup);
+  p->backup = 0;
   if(p->pagetable)
     proc_freepagetable(p->pagetable, p->sz);
+  p->alrm_hdlr = 0;
+  p->alrm_period = 0;
+  p->alrm_ticks = 0;
+  p->inalrm = 0;
   p->pagetable = 0;
   p->sz = 0;
   p->pid = 0;
