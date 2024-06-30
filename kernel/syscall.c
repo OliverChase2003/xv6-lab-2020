@@ -67,6 +67,9 @@ argint(int n, int *ip)
 int
 argaddr(int n, uint64 *ip)
 {
+  struct proc *p = myproc();
+  if(walkaddr(p->pagetable, *ip) == 0)
+    lazy(p, *ip);
   *ip = argraw(n);
   return 0;
 }
