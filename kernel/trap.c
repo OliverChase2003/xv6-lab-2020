@@ -65,6 +65,17 @@ usertrap(void)
     intr_on();
 
     syscall();
+  } else if(r_scause() == 15){
+    uint64 va = PGROUNDDOWN(r_stval());
+    uint64 pa = walkaddr(p->pagetable, va);
+
+    if(pa != 0){  //can find pte mapped by pgtbl but write flag is 0 => cow
+      if(cow_copy(va, pa, p) != 0){
+        printf("cowcopy_failed");
+        p->killed = 1;
+      }
+    }
+    //then lazy allocation
   } else if((which_dev = devintr()) != 0){
     // ok
   } else {
@@ -137,6 +148,7 @@ kerneltrap()
   uint64 sepc = r_sepc();
   uint64 sstatus = r_sstatus();
   uint64 scause = r_scause();
+  //struct proc *p = myproc();
   
   if((sstatus & SSTATUS_SPP) == 0)
     panic("kerneltrap: not from supervisor mode");

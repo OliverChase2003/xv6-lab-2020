@@ -3,6 +3,8 @@
 #include "memlayout.h"
 #include "elf.h"
 #include "riscv.h"
+#include "spinlock.h"
+#include "proc.h"
 #include "defs.h"
 #include "fs.h"
 
@@ -311,22 +313,21 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
   pte_t *pte;
   uint64 pa, i;
   uint flags;
-  char *mem;
 
   for(i = 0; i < sz; i += PGSIZE){
     if((pte = walk(old, i, 0)) == 0)
       panic("uvmcopy: pte should exist");
     if((*pte & PTE_V) == 0)
       panic("uvmcopy: page not present");
+    
     pa = PTE2PA(*pte);
-    flags = PTE_FLAGS(*pte);
-    if((mem = kalloc()) == 0)
-      goto err;
-    memmove(mem, (char*)pa, PGSIZE);
-    if(mappages(new, i, PGSIZE, (uint64)mem, flags) != 0){
-      kfree(mem);
+    flags = PTE_FLAGS(*pte) & ~PTE_W;
+    *pte &= ~PTE_W;
+
+    if(mappages(new, i, PGSIZE, (uint64)pa, flags) != 0){
       goto err;
     }
+    idxplus(pa);
   }
   return 0;
 
@@ -355,15 +356,30 @@ int
 copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
 {
   uint64 n, va0, pa0;
+  pte_t *pte;
 
   while(len > 0){
     va0 = PGROUNDDOWN(dstva);
+    if(va0 >= MAXVA){
+      printf("copyout: va exceeds MAXVA\n");
+      return -1;
+    }
     pa0 = walkaddr(pagetable, va0);
     if(pa0 == 0)
       return -1;
+    pte = walk(pagetable, va0, 0);
+    if(pte == 0 || (*pte & PTE_U) == 0 || (*pte & PTE_V) == 0){
+      printf("copyout: invalid pte\n");
+      return -1;
+    }
+    if(!(*pte & PTE_W)){
+      if(cow_copy(va0, pa0, myproc()) != 0){
+        return -1;
+      }
+    }
     n = PGSIZE - (dstva - va0);
-    if(n > len)
-      n = len;
+    if(n > len) // check if write more than 1 page
+      n = len;  // if write only 1 page, write all the message
     memmove((void *)(pa0 + (dstva - va0)), src, n);
 
     len -= n;
@@ -439,4 +455,27 @@ copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
   } else {
     return -1;
   }
+}
+
+int
+cow_copy(uint64 va, uint64 pa, struct proc *p)
+{
+  if(va >= MAXVA){
+    printf("cow_copy: exceeds MAXVA\n");
+    return -1;
+  }
+  uint64 npa;
+  if((npa = (uint64)kalloc()) == 0){
+    printf("cowcopy: kalloc\n");
+    return -1;
+  }    // alloc a new page
+  memmove((void*)npa, (char*)pa, PGSIZE); // copy to new page form the old one
+  uvmunmap(p->pagetable, va, 1, 0);  // unmap the old page
+  kfree((void*)pa);
+  int flags = PTE_W | PTE_R | PTE_X | PTE_U;  // set flags
+  if(mappages(p->pagetable, va, PGSIZE, npa, flags) != 0){  // map new pages
+    printf("cow_copy: mappage\n");
+    return -1;
+  }
+  return 0;
 }
