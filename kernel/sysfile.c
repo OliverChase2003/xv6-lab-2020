@@ -308,8 +308,39 @@ sys_open(void)
       end_op();
       return -1;
     }
-    ilock(ip);
+    ilock(ip);  //lock ip
     if(ip->type == T_DIR && omode != O_RDONLY){
+      iunlockput(ip);
+      end_op();
+      return -1;
+    }
+  }
+
+  int depth = 0;
+  while(ip->type == T_SYMLINK && !(omode & O_NOFOLLOW)){
+    char target[MAXPATH];
+    memset(target, 0, MAXPATH);
+
+    if(readi(ip, 0, (uint64)target, 0, MAXPATH) < 0){
+      iunlockput(ip);
+      end_op();
+      return -1;
+    }
+    
+    iunlockput(ip); // release the ip lock,
+    // and acquire it after invoke namei().
+
+    // Q: why here release the lock of ip?
+    // one process should not hold two inode lock
+    // at the same time, which would cause dead lock
+    if((ip = namei(target)) == 0){
+      end_op();
+      return -1;
+    }
+
+    ilock(ip);
+    depth++;
+    if(depth > 10){
       iunlockput(ip);
       end_op();
       return -1;
@@ -483,4 +514,37 @@ sys_pipe(void)
     return -1;
   }
   return 0;
+}
+
+uint64
+sys_symlink(void)
+{
+  char target[MAXPATH];
+  char path[MAXPATH];
+  struct inode* ip;
+
+  if(argstr(0, target, MAXPATH) == -1)
+    goto bad;
+  if(argstr(1, path, MAXPATH) == -1)
+    goto bad;
+
+  begin_op();
+  if((ip = namei(path)) != 0)
+    goto bad;
+
+  ip = create(path, T_SYMLINK, 0, 0);
+  if(ip == 0)
+    goto bad;
+  
+  if (writei(ip, 0, (uint64)target, 0, MAXPATH) < 0)
+    goto bad;
+  
+  iunlockput(ip);
+
+  end_op();
+  return 0;
+
+  bad:
+    end_op();
+    return -1;
 }
